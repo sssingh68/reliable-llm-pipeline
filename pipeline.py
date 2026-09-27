@@ -12,18 +12,28 @@ def fake_llm(prompt):                      # ← dabba 1
     return f"Answer to: {prompt}"
 
 
-def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl"):   # ← dabba 2
+def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl", max_retries=3):
     run_id = str(uuid.uuid4())
     start = time.perf_counter()
 
-    try:
-        output = llm(prompt)
-        ok = True
-        error = None
-    except Exception as e:
-        output = None
-        ok = False
-        error = str(e)
+    output = None
+    ok = False
+    error = None
+    attempts = 0
+
+    for attempt in range(max_retries):        # attempt = 0, 1, 2
+        attempts = attempt + 1                 # insaani ginti (1,2,3)
+        try:
+            output = llm(prompt)
+            ok = True
+            error = None
+            break                              # success → loop rok do
+        except Exception as e:
+            error = str(e)
+            ok = False
+            if attempt < max_retries - 1:      # aakhri attempt nahi to hi ruko
+                backoff = 2 ** attempt         # TODO samjho: 1, 2, 4 sec
+                time.sleep(backoff)
 
     latency_ms = (time.perf_counter() - start) * 1000
 
@@ -32,6 +42,7 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl"):   # ← dabba 
         "ok": ok,
         "output": output,
         "error": error,
+        "attempts": attempts,                  # NAYA: kitni koshish lagi
         "latency_ms": round(latency_ms, 1),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
