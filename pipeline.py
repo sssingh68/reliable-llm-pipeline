@@ -14,7 +14,7 @@ def fake_llm(prompt):                      # ← dabba 1
 
 def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
                     max_retries=3,
-                    fallback="[fallback] Service busy, please try again later."):   # NEW: fallback param
+                    fallback="[fallback] Service busy, please try again later.", confidence_threshold=0.7):   
     run_id = str(uuid.uuid4())
     start = time.perf_counter()
 
@@ -42,6 +42,13 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
         output = fallback                # NEW: safe default do
         fallback_used = True             # NEW: flag set
 
+    confidence = None                                        # NEW
+    needs_review = False                                     # NEW
+    if ok:                                                   # NEW: sirf real success ka confidence
+        confidence = round(random.uniform(0.5, 1.0), 2)      # NEW: simulated (real = logprobs)
+        if confidence < confidence_threshold:                # NEW: kam confidence
+            needs_review = True                              # NEW: human ke liye flag
+
     latency_ms = (time.perf_counter() - start) * 1000
 
     record = {
@@ -50,6 +57,8 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
         "output": output,                # ab fallback text hai, None nahi
         "error": error,
         "attempts": attempts,
+        "confidence": confidence,
+        "needs_review": needs_review,
         "fallback_used": fallback_used,  # NEW: metric field
         "latency_ms": round(latency_ms, 1),
         "timestamp": datetime.now(timezone.utc).isoformat(),
