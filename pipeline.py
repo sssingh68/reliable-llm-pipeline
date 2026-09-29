@@ -5,7 +5,10 @@ import random
 from datetime import datetime, timezone
 
 
-def fake_llm(prompt):                      # ← dabba 1
+_idempotency_store = {}   # NEW: module-level store, key -> record
+
+
+def fake_llm(prompt):
     time.sleep(random.uniform(0.1, 0.5))
     if random.random() < 0.3:
         raise TimeoutError("fake LLM timed out")
@@ -14,7 +17,14 @@ def fake_llm(prompt):                      # ← dabba 1
 
 def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
                     max_retries=3,
-                    fallback="[fallback] Service busy, please try again later.", confidence_threshold=0.7):   
+                    fallback="[fallback] Service busy, please try again later.",
+                    confidence_threshold=0.7,
+                    idempotency_key=None):                       # NEW param
+
+    # --- idempotency check: process se pehle ---            # NEW block
+    if idempotency_key is not None and idempotency_key in _idempotency_store:
+        return _idempotency_store[idempotency_key]            # cached, dobara process nahi
+
     run_id = str(uuid.uuid4())
     start = time.perf_counter()
 
@@ -37,29 +47,30 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
                 backoff = 2 ** attempt
                 time.sleep(backoff)
 
-    fallback_used = False                # NEW
-    if not ok:                           # NEW: saari retries fail hui
-        output = fallback                # NEW: safe default do
-        fallback_used = True             # NEW: flag set
+    fallback_used = False
+    if not ok:
+        output = fallback
+        fallback_used = True
 
-    confidence = None                                        # NEW
-    needs_review = False                                     # NEW
-    if ok:                                                   # NEW: sirf real success ka confidence
-        confidence = round(random.uniform(0.5, 1.0), 2)      # NEW: simulated (real = logprobs)
-        if confidence < confidence_threshold:                # NEW: kam confidence
-            needs_review = True                              # NEW: human ke liye flag
+    confidence = None
+    needs_review = False
+    if ok:
+        confidence = round(random.uniform(0.5, 1.0), 2)
+        if confidence < confidence_threshold:
+            needs_review = True
 
     latency_ms = (time.perf_counter() - start) * 1000
 
     record = {
         "run_id": run_id,
-        "ok": ok,                        # ok abhi bhi False (real success nahi)
-        "output": output,                # ab fallback text hai, None nahi
+        "ok": ok,
+        "output": output,
         "error": error,
         "attempts": attempts,
+        "fallback_used": fallback_used,
         "confidence": confidence,
         "needs_review": needs_review,
-        "fallback_used": fallback_used,  # NEW: metric field
+        "idempotency_key": idempotency_key,                  # NEW field
         "latency_ms": round(latency_ms, 1),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -67,11 +78,20 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
     with open(log_file, "a") as f:
         f.write(json.dumps(record) + "\n")
 
+    # --- store for idempotency: return se pehle ---         # NEW block
+    if idempotency_key is not None:
+        _idempotency_store[idempotency_key] = record
+
     return record
 
 
-if __name__ == "__main__":                 # ← dabba 3 (bilkul left se, bahar)
+if __name__ == "__main__":
     results = [traced_llm_call(f"question {i}") for i in range(10)]
     ok = sum(1 for r in results if r["ok"])
     avg = sum(r["latency_ms"] for r in results) / len(results)
     print(f"Success: {ok}/10, Avg latency: {avg:.1f} ms")
+
+    # idempotency test                                       # NEW
+    r1 = traced_llm_call("hello", idempotency_key="abc")
+    r2 = traced_llm_call("hello", idempotency_key="abc")
+    print("same run_id (idempotent):", r1["run_id"] == r2["run_id"])
