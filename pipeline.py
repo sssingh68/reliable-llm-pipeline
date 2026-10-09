@@ -2,6 +2,7 @@ import time
 import uuid
 import json
 import random
+import boto3
 from datetime import datetime, timezone
 
 
@@ -13,6 +14,16 @@ def fake_llm(prompt):
     if random.random() < 0.3:
         raise TimeoutError("fake LLM timed out")
     return f"Answer to: {prompt}"
+
+_bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+def real_llm(prompt, model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"):
+    resp = _bedrock.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": 300, "temperature": 0.7},
+    )
+    return resp["output"]["message"]["content"][0]["text"]
 
 
 def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
@@ -83,6 +94,11 @@ def traced_llm_call(prompt, llm=fake_llm, log_file="runs.jsonl",
         _idempotency_store[idempotency_key] = record
 
     return record
+
+def handler(event, context):
+    prompt = event.get("prompt", "Hello from Lambda")
+    result = traced_llm_call(prompt, llm=real_llm, log_file="/tmp/runs.jsonl")
+    return {"statusCode": 200, "body": json.dumps(result)}
 
 
 if __name__ == "__main__":
