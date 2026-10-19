@@ -1,0 +1,5 @@
+{
+  "returns output on success": true,
+  "falls back when llm always fails": true,
+  "record always has required fields": true
+}
