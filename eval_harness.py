@@ -1,17 +1,16 @@
 import json
 import os
+import sys
 from pipeline import traced_llm_call
 
 BASELINE_FILE = "baseline.json"
 
-# --- test doubles ---
 def always_ok_llm(prompt):
     return f"OK: {prompt}"
 
 def always_fail_llm(prompt):
     raise TimeoutError("simulated failure")
 
-# --- eval cases ---
 EVAL_CASES = [
     ("returns output on success",
      always_ok_llm, "hello",
@@ -55,7 +54,7 @@ def check_regressions(results):
     if not os.path.exists(BASELINE_FILE):
         print("\nNo baseline yet — saving current results as baseline.")
         save_baseline(results)
-        return
+        return False
     with open(BASELINE_FILE) as f:
         baseline = json.load(f)
     regressions = [name for name, ok in results.items()
@@ -64,12 +63,15 @@ def check_regressions(results):
         print("\n[!] REGRESSIONS (passed before, now failing):")
         for name in regressions:
             print(f"    - {name}")
-    else:
-        print("\nNo regressions vs baseline.")
+        return True
+    print("\nNo regressions vs baseline.")
+    return False
 
 
 if __name__ == "__main__":
     results, records = run_evals()
     print_results(results)
     print_metrics(results, records)
-    check_regressions(results)
+    regressed = check_regressions(results)
+    if not all(results.values()) or regressed:
+        sys.exit(1)   # fail CI if any eval fails or a regression appears
