@@ -26,16 +26,26 @@ EVAL_CASES = [
 
 def run_evals():
     results = {}
+    records = []
     for name, llm, prompt, check in EVAL_CASES:
         record = traced_llm_call(prompt, llm=llm, log_file="eval_runs.jsonl")
         results[name] = check(record)
-    return results
+        records.append(record)
+    return results, records
 
 def print_results(results):
     for name, ok in results.items():
         print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+
+def print_metrics(results, records):
+    total = len(records)
     passed = sum(1 for ok in results.values() if ok)
-    print(f"\n{passed}/{len(results)} evals passed")
+    avg_latency = sum(r["latency_ms"] for r in records) / total
+    fallback_rate = sum(1 for r in records if r["fallback_used"]) / total * 100
+    print("\n--- Metrics ---")
+    print(f"Pass rate:     {passed/total*100:.0f}%  ({passed}/{total})")
+    print(f"Avg latency:   {avg_latency:.1f} ms")
+    print(f"Fallback rate: {fallback_rate:.0f}%")
 
 def save_baseline(results):
     with open(BASELINE_FILE, "w") as f:
@@ -59,6 +69,7 @@ def check_regressions(results):
 
 
 if __name__ == "__main__":
-    results = run_evals()
+    results, records = run_evals()
     print_results(results)
+    print_metrics(results, records)
     check_regressions(results)
